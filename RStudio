@@ -1,0 +1,166 @@
+install.packages("ggplot")
+install.packages("ggcorrplot")
+install.packages("tidyverse")
+install.packages("stargazer")
+install.packages("data.table")
+install.packages("mice")
+install.packages("shaply")
+install.packages("sf")
+install.packages("qgisprocess")
+
+library(ggplot2)
+library(data.table)
+library(ggcorrplot)
+library(tidyverse)
+library(stargazer)
+library(mice)
+library(sf)
+library(qgisprocess)
+# 4 years of data was imported
+
+
+B2012M_full <- read.csv("B2012M_full.csv")
+B2013M_full <- read.csv("B2013M_full.csv")
+B2014M_full <- read.csv("B2014M_full.csv")
+B2015M_full <- read.csv("B2015M_full.csv")
+
+# Unifying the datasets
+
+# Getting column names of data sets
+B2012M_cols <- names(B2012M_full)
+B2013M_cols <- names(B2013M_full)
+B2014M_cols <- names(B2014M_full)
+B2015M_cols <- names(B2015M_full)
+
+# Finding common column names
+common_cols <- Reduce(intersect, list(B2012M_cols, B2013M_cols, B2014M_cols, B2015M_cols))
+
+# Dropping only common columns in each data set
+B2012M_full_common <- B2012M_full[, common_cols]
+B2013M_full_common <- B2013M_full[, common_cols]
+B2014M_full_common <- B2014M_full[, common_cols]
+B2015M_full_common <- B2015M_full[, common_cols]
+
+combined_data <- rbind(B2012M_full_common, B2013M_full_common, B2014M_full_common, B2015M_full_common)
+
+View(combined_data)
+
+# Checking NA Values
+any(is.na(combined_data))
+# Visualizing the NA map
+missmap(combined_data)
+
+# Fixing NA values
+combined_data$Anzahl.Ste[is.na(combined_data$Anzahl.Ste)] <- 0
+
+mode_value_last_modification <- names(which.max(table(combined_data$Letzte.Mod)))
+# The answer is 2013, so we should make NA values to 2013
+
+
+################# Outliers ################
+
+# Z-score
+z_scores <- scale(combined_data$Schlafzimm)
+
+# Outliers detection
+outliers_bedroom <- combined_data$Schlafzimm[abs(z_scores) > 3]
+outliers_bedroom
+
+# Alteration of the outliers with mean value
+mean_value_bedroom <- mean(combined_data$Schlafzimm, na.rm = TRUE)
+combined_data$Schlafzimm[combined_data$Schlafzimm %in% outliers_bedroom] <- mean_value_bedroom
+
+# Visualisation of outliers
+ggplot(combined_data, aes(y = Schlafzimm)) + 
+  geom_boxplot() +
+  labs(title = "Box Plot for Outliers Detection of Bedrooms", y = "Bedroom")
+
+# Bathroom
+
+mean_badezimmer <- mean(combined_data$Badezimmer[combined_data$Badezimmer != 11], na.rm = TRUE)
+combined_data$Badezimmer[combined_data$Badezimmer == 11] <- mean_badezimmer
+
+# Total number of floors
+
+mean_etagenanza_outlier <- mean(combined_data$Etagenanza[combined_data$Etagenanza <= 50], na.rm = TRUE)
+combined_data$Etagenanza[combined_data$Etagenanza > 50] <- mean_etagenanza_outlier
+
+summary(combined_data)
+View(combined_data)
+
+# Last Modification
+mean_letzte_mod_outlier <- mean(combined_data$Letzte.Mod[combined_data$Letzte.Mod <= 2015], na.rm = TRUE)
+combined_data$Letzte.Mod[combined_data$Letzte.Mod > 2015] <- mean_letzte_mod_outlier
+
+stargazer(combined_data)
+############################################################################
+
+qgis_configure(path ="C:\Program Files\QGIS 3.36.2\bin\qgis-bin.exe")  
+# Replace with your QGIS installation path
+
+# Load necessary packages
+library(sf)
+library(utils)
+library(qgisprocess)
+
+# Load necessary packages
+library(sf)
+library(utils)
+library(qgisprocess)
+
+# Define the path to the ZIP archive containing the shapefile
+zipfile <- "C:/Users/monster/Desktop/2023-24/TU Dresden/Dersler/2024 Summer Term/Empirical Research in Spatial and Environmental Economics/berlin-latest-free.zip"
+
+# Define the extraction directory
+extract_dir <- "C:/Users/monster/Desktop/2023-24/TU Dresden/Dersler/2024 Summer Term/Empirical Research in Spatial and Environmental Economics/berlin_extracted"
+
+# Create the extraction directory if it doesn't exist
+dir.create(extract_dir, showWarnings = FALSE)
+
+# Unzip the file
+tryCatch({
+  unzip(zipfile, exdir = extract_dir)
+  print("ZIP file extracted successfully.")
+}, error = function(e) {
+  stop("Error extracting ZIP file: ", e$message)
+})
+
+# Function to find the .shp file in the extracted directory
+find_shapefile <- function(directory) {
+  print(paste("Searching for .shp files in:", directory))
+  shp_files <- list.files(directory, pattern = "\\.shp$", recursive = TRUE, full.names = TRUE)
+  if (length(shp_files) == 0) {
+    print("Contents of the extracted directory:")
+    print(list.files(directory, recursive = TRUE))
+    stop("No .shp file found in the extracted directory.")
+  }
+  print(paste("Found shapefile:", shp_files[1]))
+  return(shp_files[1])  # Return the first .shp file found
+}
+
+# Find the shapefile in the extracted directory
+tryCatch({
+  shapefile_path <- find_shapefile(extract_dir)
+}, error = function(e) {
+  stop("Error finding shapefile: ", e$message)
+})
+
+# Read the shapefile
+shapefile <- st_read(shapefile_path)
+
+# Perform a simple operation: Plotting the shapefile
+plot(st_geometry(shapefile), col = 'blue', main = "Shapefile from Extracted ZIP")
+
+# Save the shapefile to a new location if needed
+output_path <- file.path(extract_dir, "berlin-latest-free-extracted.shp")
+st_write(shapefile, output_path, delete_layer = TRUE)
+
+# Initialize QGIS connection
+qgis_configure()
+
+# Open the shapefile in QGIS
+qgis_run_algorithm("native:loadlayer", 
+                   INPUT = output_path,
+                   NAME = "Extracted Shapefile")
+
+print("Shapefile loaded in QGIS. Please check your QGIS application.")
